@@ -719,6 +719,97 @@ static char *create_tool_text_response(const char *text) {
 	return pj_drain (pj);
 }
 
+static char *create_tool_paginated_response(char *text, const int count, const int offset) {
+	if (text == NULL || (count == 0 && offset == 0)) {
+		return text;
+	}
+
+	// Create working copy of input text
+    char *text_copy = strdup(text);
+    free((char *)text);
+
+    // Setup for line parsing
+    char **lines = NULL;
+    size_t *line_lens = NULL;
+    size_t total_lines = 0;
+
+    if (text_copy != NULL) {
+        char *p = text_copy;
+        while (*p != '\0') {
+            char *line_start = p;
+            size_t line_len = 0;
+
+            // Find next newline or end of string
+            while (*p != '\0' && *p != '\n') {
+                p++;
+                line_len++;
+            }
+
+            // Record line position and length
+            total_lines++;
+            lines = realloc(lines, sizeof(char *) * total_lines);
+            line_lens = realloc(line_lens, sizeof(size_t) * total_lines);
+            lines[total_lines - 1] = line_start;
+            line_lens[total_lines - 1] = line_len;
+
+            // Skip newline if present
+            if (*p == '\n') p++;
+        }
+    }
+	if (total_lines <= 2) {
+		return text_copy;
+	}
+
+    // Calculate pagination bounds
+    size_t start_index = offset + 2;
+    size_t end_index = start_index + count -1;
+	if (count == 0) {
+		end_index = total_lines - 1;  // Show all content if count=0
+	}
+	if (end_index >= total_lines) {
+		end_index = total_lines - 1;
+	}
+	if (start_index >= total_lines) {
+		start_index = total_lines -1;
+	}
+
+    // Calculate total output length
+	size_t content_len = 0;
+	for (size_t i = start_index; i <= end_index; i++) {
+		content_len += line_lens[i] + 1;
+	}
+	size_t title_len = line_lens[0] + 1 + line_lens[1] + 1;
+    size_t total_len = content_len + title_len;
+
+    // Construct output string
+    char *output = malloc(total_len);
+    if (output == NULL) {
+        free(lines);
+        free(line_lens);
+        free(text_copy);
+        return strdup("error: memory allocation failed");
+    }
+
+    char *pos = output;
+
+    // Copy title line
+	memcpy(pos, lines[0], title_len);
+	pos += title_len;
+	*pos = '\n';
+
+    // Copy content lines
+	memcpy(pos, lines[start_index], content_len);
+	pos += content_len;
+    *pos = '\0';
+
+    // Clean up temporary storage
+    free(lines);
+    free(line_lens);
+    free(text_copy);
+
+    return output;
+}
+
 static char *handle_mcp_request(const char *method, RJson *params, const char *id) {
 	char *error = NULL;
 	char *result = NULL;
@@ -785,7 +876,7 @@ static char *handle_list_tools(RJson *params) {
 			"{\"type\":\"object\",\"properties\":{}}" },
 		{ "listFunctions",
 			"List all functions found after the analysis",
-			"{\"type\":\"object\",\"properties\":{}}" },
+			"{\"type\":\"object\",\"properties\":{\"offset\":{\"type\":\"number\",\"description\":\"Offset to start listing from (start at 0)\"},\"count\": {\"type\": \"number\", \"description\":\"Number of functions to list (100 is a good default, 0 means remainder)\"}},\"required\":[\"offset\",\"count\"]}" },
 		{ "listLibraries",
 			"List libraries linked to this binary",
 			"{\"type\":\"object\",\"properties\":{}}" },
@@ -965,7 +1056,10 @@ static char *handle_call_tool(RJson *params) {
 
 	// Handle listFunctions tool
 	if (!strcmp (tool_name, "listFunctions")) {
+		const int count = r_json_get_num (tool_args, "count");
+		const int offset = r_json_get_num (tool_args, "offset");
 		char *res = r2_cmd ("afl,addr/cols/name");
+		res = create_tool_paginated_response (res, count, offset);
 		char *o = create_tool_text_response (res);
 		free (res);
 		return o;
