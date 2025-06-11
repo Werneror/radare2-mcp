@@ -1229,6 +1229,8 @@ static char *handle_call_tool(RJson *params) {
 	// Handle listAllStrings tool
 	if (!strcmp (tool_name, "listAllStrings")) {
 		const char *filter = r_json_get_str (tool_args, "filter");
+		const int count = r_json_get_num (tool_args, "count");
+		const int offset = r_json_get_num (tool_args, "offset");
 
 		char *result = r2_cmd ("izzzqq");
 		if (R_STR_ISNOTEMPTY (filter)) {
@@ -1252,6 +1254,7 @@ static char *handle_call_tool(RJson *params) {
 			free (result);
 			result = r_strbuf_drain (sb);
 		}
+		result = create_tool_paginated_response (result, count, offset);
 		char *response = create_tool_text_response (result);
 		free (result);
 		return response;
